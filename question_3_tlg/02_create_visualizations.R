@@ -1,0 +1,92 @@
+##################
+# Loading packages
+##################
+library(pharmaverseadam) # package for loading data
+library(ggplot2) # package for plotting
+library(dplyr) # package for manipulating data
+library(GenBinomApps) # package for confidence intervals
+
+##############
+# Loading data
+##############
+
+adae <- pharmaverseadam::adae
+
+########################################################
+# Creating plot of AE severity distribution by treatment
+########################################################
+
+aesev_plot <- adae %>% 
+  filter(TRTEMFL == "Y")%>% # filtering on treatment-emergent AEs
+  ggplot(aes(x = ACTARM, fill = AESEV)) +
+  geom_bar() +
+  labs(
+    title = "AE Severity Distribution by Treatment",
+    x = "AE Severity",
+    y = "Treatment Arm",
+    fill = "Count of AEs"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.background = element_rect(fill = "white", color = NA),
+        panel.background = element_rect(fill = "white", color = NA))
+
+aesev_plot
+
+######################################
+# Top 10 AE forest plot pre-processing
+######################################
+
+ae_counts <- adae %>%
+  filter(TRTEMFL == "Y") %>% # filter on TEAEs
+  group_by(AETERM) %>% # group by the adverse event type
+  summarise(
+    n_patients = n_distinct(USUBJID), # count unique patients with that AE
+    .groups = "drop"
+  ) %>%
+  mutate(
+    n_total = n_distinct(adae$USUBJID),  # total patients in study
+    rate = n_patients / n_total # incidence rate
+  ) %>% 
+  rowwise() %>%
+  mutate(lower.ci = clopper.pearson.ci(k = n_patients, n_total, CI = "two.sided")$Lower.limit,
+         upper.ci = clopper.pearson.ci(k = n_patients, n_total, CI = "two.sided")$Upper.limit) %>%
+  ungroup() %>%
+  slice_max(n_patients, n = 10) # selecting top 10 adverse events
+
+#####################################################################################
+# Creating forest plot of Top 10 most frequent AEs (with 95% CI for incidence rates)
+#####################################################################################
+
+top10_AE_plot <- ggplot(ae_counts, aes(x = rate, y = reorder(AETERM, rate), xmin = lower.ci, xmax = upper.ci)) +
+  geom_point(position = position_dodge(width = 0.7), size = 3) +
+  geom_errorbarh(position = position_dodge(width = 0.7), height = 0.2) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Percentage of Patients (%)",
+    y = "Adverse Event",
+    color = "Treatment Arm",
+    title = "Top 10 Most Frequent Adverse Events", 
+    subtitle = "n = 225 subjects; 95% Clopper-Pearson CIs"
+  ) +
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "white", color = NA),
+        panel.background = element_rect(fill = "white", color = NA))
+
+###########################
+# Outputting plots as PNGs
+###########################
+
+ggsave(
+  filename = "aesev_plot.png",
+  plot = aesev_plot, 
+  width = 8, height = 6,
+  dpi = 300
+)
+
+ggsave(
+  filename = "top10_AE_plot.png",    # file name
+  plot = top10_AE_plot,                    # the ggplot object
+  width = 8, height = 6,       # in inches
+  dpi = 300                     # resolution
+)
